@@ -1,5 +1,5 @@
 {
   "type": "chat_message",
   "payload": "hello from user 1",
-  "receiverId": "user2"
+  "receiverID": "user2"
 }
