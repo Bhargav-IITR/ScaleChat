@@ -1,0 +1,6 @@
+.env*
+/docs
+/metrics
+/scripts
+/target
+/.git
