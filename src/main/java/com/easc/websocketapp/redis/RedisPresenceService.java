@@ -32,14 +32,7 @@ public class RedisPresenceService {
     }
 
     public Set<String> getServerIdsForUser(String userId) {
-        Set<String> members = redisTemplate.opsForSet().members(userServersKey(userId));
-        if (members == null || members.isEmpty()) {
-            return Set.of();
-        }
-
-        return members.stream()
-                .filter(member -> member != null && !member.isBlank())
-                .collect(Collectors.toUnmodifiableSet());
+        return readServerSet(userServersKey(userId));
     }
 
     public boolean isUserOnlineOnServer(String userId, String serverId) {
@@ -54,8 +47,28 @@ public class RedisPresenceService {
         redisTemplate.convertAndSend(serverChannel(serverId), payload);
     }
 
+    public void registerRoomOnServer(String roomId, String serverId) {
+        redisTemplate.opsForSet().add(roomServersKey(roomId), serverId);
+    }
+
+    public void unregisterRoomFromServer(String roomId, String serverId) {
+        redisTemplate.opsForSet().remove(roomServersKey(roomId), serverId);
+    }
+
+    public Set<String> getServerIdsForRoom(String roomId) {
+        return readServerSet(roomServersKey(roomId));
+    }
+
+    public void removeRoomServerMapping(String roomId, String serverId) {
+        redisTemplate.opsForSet().remove(roomServersKey(roomId), serverId);
+    }
+
     public static String userServersKey(String userId) {
         return "user_servers:" + userId;
+    }
+
+    public static String roomServersKey(String roomId) {
+        return "room:" + roomId;
     }
 
     public static String userOnlineKey(String userId, String serverId) {
@@ -64,5 +77,16 @@ public class RedisPresenceService {
 
     public static String serverChannel(String serverId) {
         return "server:" + serverId;
+    }
+
+    private Set<String> readServerSet(String key) {
+        Set<String> members = redisTemplate.opsForSet().members(key);
+        if (members == null || members.isEmpty()) {
+            return Set.of();
+        }
+
+        return members.stream()
+                .filter(member -> member != null && !member.isBlank())
+                .collect(Collectors.toUnmodifiableSet());
     }
 }

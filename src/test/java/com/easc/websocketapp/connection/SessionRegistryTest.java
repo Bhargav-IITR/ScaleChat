@@ -4,13 +4,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.easc.websocketapp.config.AppProperties;
 import com.easc.websocketapp.metrics.MetricsService;
+import com.easc.websocketapp.model.WsMessage;
+import com.easc.websocketapp.model.WsMessageType;
 import com.easc.websocketapp.redis.RedisPresenceService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Delayed;
 import java.util.concurrent.ExecutionException;
@@ -21,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.scheduling.TaskScheduler;
+import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketExtension;
 import org.springframework.web.socket.WebSocketSession;
 
@@ -33,6 +39,9 @@ class SessionRegistryTest {
     private TrackingScheduledFuture heartbeatFutureTwo;
     private WebSocketSession sessionOne;
     private WebSocketSession sessionTwo;
+    private SessionState sessionOneState;
+    private SessionState sessionTwoState;
+    private ObjectMapper objectMapper;
 
     private SessionRegistry sessionRegistry;
     private AppProperties appProperties;
@@ -44,8 +53,7 @@ class SessionRegistryTest {
                 "8081",
                 "supersecret",
                 "development",
-                "redis://localhost:6379",
-                "ap-south-1"
+                "redis://localhost:6379"
         );
 
         redisPresenceService = new TrackingRedisPresenceService();
@@ -53,15 +61,22 @@ class SessionRegistryTest {
         heartbeatFutureOne = new TrackingScheduledFuture();
         heartbeatFutureTwo = new TrackingScheduledFuture();
         taskScheduler = taskSchedulerReturning(heartbeatFutureOne, heartbeatFutureTwo);
-        sessionOne = webSocketSession("session-1");
-        sessionTwo = webSocketSession("session-2");
+        objectMapper = new ObjectMapper();
+
+        SessionHandle sessionHandleOne = webSocketSession("session-1");
+        sessionOne = sessionHandleOne.session();
+        sessionOneState = sessionHandleOne.state();
+
+        SessionHandle sessionHandleTwo = webSocketSession("session-2");
+        sessionTwo = sessionHandleTwo.session();
+        sessionTwoState = sessionHandleTwo.state();
 
         sessionRegistry = new SessionRegistry(
                 appProperties,
                 redisPresenceService,
                 metricsService,
                 taskScheduler,
-                new ObjectMapper()
+                objectMapper
         );
     }
 
@@ -90,6 +105,39 @@ class SessionRegistryTest {
         assertThat(heartbeatFutureTwo.cancelled).isTrue();
     }
 
+    @Test
+    void keepsRoomRegisteredUntilLastLocalMemberLeaves() {
+        sessionRegistry.register("alice", sessionOne);
+        sessionRegistry.register("bob", sessionTwo);
+
+        assertThat(sessionRegistry.joinRoom("session-1", "room-1")).isTrue();
+        assertThat(sessionRegistry.joinRoom("session-2", "room-1")).isTrue();
+        assertThat(redisPresenceService.roomRegisterCalls).isEqualTo(1);
+
+        WsMessage roomMessage = new WsMessage();
+        roomMessage.setType(WsMessageType.ROOM_MESSAGE);
+        roomMessage.setRoomId("room-1");
+        roomMessage.setSenderId("alice");
+        roomMessage.setPayload(objectMapper.valueToTree("hello room"));
+
+        sessionRegistry.sendMessageToLocalRoom(roomMessage);
+
+        assertThat(sessionOneState.sentPayloads).hasSize(1);
+        assertThat(sessionTwoState.sentPayloads).hasSize(1);
+
+        sessionRegistry.leaveRoom("session-1", "room-1");
+
+        assertThat(redisPresenceService.roomUnregisterCalls).isZero();
+        assertThat(metricsService.roomJoinCount).isEqualTo(2);
+        assertThat(metricsService.roomLeaveCount).isEqualTo(1);
+
+        sessionRegistry.leaveRoom("session-2", "room-1");
+
+        assertThat(redisPresenceService.roomUnregisterCalls).isEqualTo(1);
+        assertThat(redisPresenceService.lastUnregisteredRoomId).isEqualTo("room-1");
+        assertThat(metricsService.roomLeaveCount).isEqualTo(2);
+    }
+
     private TaskScheduler taskSchedulerReturning(ScheduledFuture<?>... futures) {
         Deque<ScheduledFuture<?>> returnedFutures = new ArrayDeque<>();
         for (ScheduledFuture<?> future : futures) {
@@ -101,6 +149,7 @@ class SessionRegistryTest {
                 new Class<?>[]{TaskScheduler.class},
                 (proxy, method, args) -> {
                     if ("scheduleAtFixedRate".equals(method.getName())
+                            && args != null
                             && args.length == 2
                             && args[0] instanceof Runnable
                             && Duration.ofSeconds(30).equals(args[1])) {
@@ -112,30 +161,37 @@ class SessionRegistryTest {
         );
     }
 
-    private WebSocketSession webSocketSession(String sessionId) {
+    private SessionHandle webSocketSession(String sessionId) {
         Map<String, Object> attributes = new HashMap<>();
         SessionState sessionState = new SessionState(sessionId, attributes);
 
-        return (WebSocketSession) Proxy.newProxyInstance(
+        WebSocketSession session = (WebSocketSession) Proxy.newProxyInstance(
                 WebSocketSession.class.getClassLoader(),
                 new Class<?>[]{WebSocketSession.class},
                 (proxy, method, args) -> switch (method.getName()) {
                     case "getId" -> sessionState.id;
                     case "getAttributes" -> sessionState.attributes;
                     case "getHandshakeHeaders" -> HttpHeaders.EMPTY;
-                    case "getExtensions" -> java.util.List.<WebSocketExtension>of();
+                    case "getExtensions" -> List.<WebSocketExtension>of();
                     case "isOpen" -> sessionState.open;
                     case "close" -> {
                         sessionState.open = false;
                         yield null;
                     }
-                    case "sendMessage" -> null;
+                    case "sendMessage" -> {
+                        if (args != null && args[0] instanceof TextMessage textMessage) {
+                            sessionState.sentPayloads.add(textMessage.getPayload());
+                        }
+                        yield null;
+                    }
                     case "setTextMessageSizeLimit", "setBinaryMessageSizeLimit" -> null;
                     case "getTextMessageSizeLimit", "getBinaryMessageSizeLimit" -> 64 * 1024;
                     case "getAcceptedProtocol", "getUri", "getPrincipal", "getLocalAddress", "getRemoteAddress" -> null;
                     default -> defaultValue(method.getReturnType());
                 }
         );
+
+        return new SessionHandle(session, sessionState);
     }
 
     private Object defaultValue(Class<?> returnType) {
@@ -172,6 +228,7 @@ class SessionRegistryTest {
     private static final class SessionState {
         private final String id;
         private final Map<String, Object> attributes;
+        private final List<String> sentPayloads = new ArrayList<>();
         private boolean open = true;
 
         private SessionState(String id, Map<String, Object> attributes) {
@@ -180,11 +237,17 @@ class SessionRegistryTest {
         }
     }
 
+    private record SessionHandle(WebSocketSession session, SessionState state) {
+    }
+
     private static final class TrackingRedisPresenceService extends RedisPresenceService {
         private int registerCalls;
         private int unregisterCalls;
+        private int roomRegisterCalls;
+        private int roomUnregisterCalls;
         private String lastUnregisteredUserId;
         private String lastUnregisteredServerId;
+        private String lastUnregisteredRoomId;
 
         private TrackingRedisPresenceService() {
             super(null);
@@ -201,14 +264,27 @@ class SessionRegistryTest {
             lastUnregisteredUserId = userId;
             lastUnregisteredServerId = serverId;
         }
+
+        @Override
+        public void registerRoomOnServer(String roomId, String serverId) {
+            roomRegisterCalls++;
+        }
+
+        @Override
+        public void unregisterRoomFromServer(String roomId, String serverId) {
+            roomUnregisterCalls++;
+            lastUnregisteredRoomId = roomId;
+        }
     }
 
     private static final class CountingMetricsService extends MetricsService {
         private int clientConnectCount;
         private int clientDisconnectCount;
+        private int roomJoinCount;
+        private int roomLeaveCount;
 
         private CountingMetricsService(AppProperties appProperties) {
-            super(null, appProperties);
+            super(new SimpleMeterRegistry(), appProperties);
         }
 
         @Override
@@ -219,6 +295,16 @@ class SessionRegistryTest {
         @Override
         public void onClientDisconnect() {
             clientDisconnectCount++;
+        }
+
+        @Override
+        public void onRoomJoin() {
+            roomJoinCount++;
+        }
+
+        @Override
+        public void onRoomLeave() {
+            roomLeaveCount++;
         }
     }
 

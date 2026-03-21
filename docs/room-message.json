@@ -1,0 +1,5 @@
+{
+  "type": "room_message",
+  "roomId": "general",
+  "payload": "hello room members"
+}

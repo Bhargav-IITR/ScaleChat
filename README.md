@@ -1,76 +1,106 @@
 # WebSocket App
 
-This project is a scalable WebSocket application built with Java and Spring Boot, designed for real-time communication and optimized for performance and reliability. It leverages Redis for presence and routing, and includes integrated metrics for monitoring via Prometheus and Grafana.
+Scalable Spring Boot websocket server with Redis-backed routing, Prometheus metrics, Grafana dashboards, direct messaging, and room/group chat across multiple server instances.
 
 ## Features
-- Real-time WebSocket communication
-- Redis-backed presence and routing
-- Health monitoring endpoints
-- Metrics collection (Prometheus)
-- Grafana dashboards for visualization
-- Docker support for easy deployment
+- 1:1 websocket messaging across servers through Redis pub/sub
+- Room/group chat with Redis room routing: `room:<roomId> -> set of active servers`
+- Prometheus metrics endpoint with self-hosted Grafana dashboards
+- Health endpoint and Docker-based local observability stack
+- Redis-backed user presence and room presence tracking
 
-## Project Structure
-- `src/main/java/com/easc/websocketapp/` — Main application source code
-  - `config/` — Application configuration classes
-  - `connection/` — WebSocket session management
-  - `metrics/` — Metrics service integration
-  - `model/` — WebSocket message models
-  - `redis/` — Redis integration and services
-  - `web/` — REST controllers
-  - `websocket/` — WebSocket handlers and configuration
-- `src/main/resources/` — Application properties
-- `metrics/prometheus/` — Prometheus configuration
-- `metrics/grafana/` — Grafana dashboards and provisioning
-- `docs/` — Documentation and reports
-- `docker-compose.yml`, `Dockerfile` — Containerization
-- `pom.xml` — Maven build configuration
+## Architecture
+- Clients connect to `/ws?userId=<id>`
+- User presence is tracked in Redis with heartbeat-backed keys
+- Direct messages resolve recipient servers from Redis and publish once per target server
+- Room messages resolve room servers from Redis and broadcast once per active server
+- Each server fans inbound Redis messages out to the local websocket sessions it owns
 
-## Getting Started
+## Message Types
+- Direct message:
+  See `docs/message.json`
+- Room join:
+  ```json
+  { "type": "room_join", "roomId": "general" }
+  ```
+- Room leave:
+  ```json
+  { "type": "room_leave", "roomId": "general" }
+  ```
+- Room message:
+  See `docs/room-message.json`
+- Latency report:
+  See `docs/latency-report.json`
+
+## Local Run
 
 ### Prerequisites
-- Java 17+
+- Java 21
 - Maven
-- Docker (optional, for containerized deployment)
-- Redis server
+- Docker Desktop
 
-### Build & Run
-1. **Build the project:**
+### App Only
+1. Start Redis:
    ```sh
-   mvn clean install
+   docker run -d --name ws-redis -p 6379:6379 redis:7-alpine
    ```
-2. **Run with Maven:**
+2. Copy env file:
    ```sh
-   mvn spring-boot:run
+   cp .env.example .env.local
    ```
-3. **Run with Docker Compose:**
-   ```sh
-   docker-compose up --build
-   ```
-
-### Configuration
-- Edit `src/main/resources/application.properties` for application settings.
-- Redis connection and presence settings are managed in `config/` and `redis/` packages.
-
-### Metrics & Monitoring
-- Prometheus scrapes metrics from the app (see `metrics/prometheus/prometheus.yml`).
-- Grafana dashboards are provisioned in `metrics/grafana/dashboards/`.
-
-## Testing
-- Unit tests are located in `src/test/java/com/easc/websocketapp/`.
-- Run tests with:
+3. Run tests:
    ```sh
    mvn test
    ```
+4. Start the app:
+   ```sh
+   mvn spring-boot:run
+   ```
 
-## Documentation
-- See `docs/` for latency reports, optimization notes, and Redis integration details.
+The websocket server listens on `http://localhost:8081` and Prometheus metrics are exposed on `http://localhost:9000/actuator/prometheus`.
 
-## License
-This project is licensed under the MIT License.
+### Full Monitoring Stack
+Run the whole local stack:
 
-## Authors
-- EASC Team
+```sh
+docker compose up --build
+```
 
----
-For questions or contributions, please open an issue or submit a pull request.
+This starts:
+- app on `http://localhost:8081`
+- Prometheus on `http://localhost:9090`
+- Grafana on `http://localhost:3000`
+
+Grafana default credentials:
+- username: `admin`
+- password: `admin`
+
+## Suggested README Screenshot
+Open the aggregated dashboard in Grafana after traffic is flowing and capture a screenshot for your README. The ready-to-use dashboards live under `metrics/grafana/dashboards/`.
+
+## Prometheus Metrics
+The app exports metrics such as:
+- `wss_active_connections`
+- `wss_active_rooms`
+- `wss_messages_total`
+- `wss_direct_messages_total`
+- `wss_room_messages_total`
+- `wss_messages_delivered_total`
+- `wss_unexpected_disconnects_total`
+- `wss_room_joins_total`
+- `wss_room_leaves_total`
+- `wss_latency_ms_sum` and `wss_latency_ms_count`
+
+## Testing The Core Flow
+1. Connect two users to `/ws?userId=user1` and `/ws?userId=user2`
+2. Send the JSON from `docs/message.json`
+3. Join both users to the same room with `room_join`
+4. Send the JSON from `docs/room-message.json`
+5. Watch deliveries in the browser console and metrics in Grafana
+
+## Project Structure
+- `src/main/java/com/easc/websocketapp/` core application code
+- `src/test/java/com/easc/websocketapp/` unit tests
+- `metrics/prometheus/` Prometheus scrape config
+- `metrics/grafana/` provisioned dashboards and datasources
+- `docs/` sample payloads and notes

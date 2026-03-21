@@ -9,6 +9,8 @@ class WsMessageTypeTest {
     @Test
     void resolvesKnownValues() {
         assertThat(WsMessageType.fromValue("chat_message")).isEqualTo(WsMessageType.CHAT_MESSAGE);
+        assertThat(WsMessageType.fromValue("room_message")).isEqualTo(WsMessageType.ROOM_MESSAGE);
+        assertThat(WsMessageType.fromValue("room_join")).isEqualTo(WsMessageType.ROOM_JOIN);
     }
 
     @Test

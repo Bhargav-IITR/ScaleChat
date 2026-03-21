@@ -7,22 +7,19 @@ public class AppProperties {
     private final String jwtSecret;
     private final String environment;
     private final String redisUri;
-    private final String awsRegion;
 
     public AppProperties(
             String serverId,
             String wssPort,
             String jwtSecret,
             String environment,
-            String redisUri,
-            String awsRegion
+            String redisUri
     ) {
         this.serverId = serverId;
         this.wssPort = wssPort;
         this.jwtSecret = jwtSecret;
         this.environment = environment;
         this.redisUri = redisUri;
-        this.awsRegion = awsRegion;
     }
 
     public String getServerId() {
@@ -43,10 +40,6 @@ public class AppProperties {
 
     public String getRedisUri() {
         return redisUri;
-    }
-
-    public String getAwsRegion() {
-        return awsRegion;
     }
 
     public String getServerChannel() {

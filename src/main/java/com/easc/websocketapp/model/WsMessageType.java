@@ -8,6 +8,9 @@ public enum WsMessageType {
     ROADMAP_READY("roadmap_ready"),
     QUIZ_READY("quiz_ready"),
     CHAT_MESSAGE("chat_message"),
+    ROOM_JOIN("room_join"),
+    ROOM_LEAVE("room_leave"),
+    ROOM_MESSAGE("room_message"),
     LATENCY_REPORT("latency_report"),
     UNKNOWN("unknown");
 

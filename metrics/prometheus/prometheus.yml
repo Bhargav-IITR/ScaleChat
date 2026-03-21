@@ -1,6 +1,6 @@
 global:
-  scrape_interval: 60s
-  evaluation_interval: 60s
+  scrape_interval: 15s
+  evaluation_interval: 15s
 
 scrape_configs:
   - job_name: "prometheus"
@@ -8,11 +8,6 @@ scrape_configs:
       - targets: ["localhost:9090"]
 
   - job_name: "wss"
-    dns_sd_configs:
-      - names: ["tasks.wss"]
-        type: A
-        port: 9000
-
-  - job_name: 'cadvisor'
+    metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ['cadvisor:8080']
+      - targets: ["wss:9000"]

@@ -2,6 +2,7 @@ package com.easc.websocketapp.redis;
 
 import com.easc.websocketapp.connection.SessionRegistry;
 import com.easc.websocketapp.model.WsMessage;
+import com.easc.websocketapp.model.WsMessageType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import org.slf4j.Logger;
@@ -32,6 +33,11 @@ public class RedisServerSubscriber implements MessageListener {
 
         try {
             WsMessage wsMessage = objectMapper.readValue(payload, WsMessage.class);
+            if (wsMessage.getType() == WsMessageType.ROOM_MESSAGE) {
+                sessionRegistry.sendMessageToLocalRoom(wsMessage);
+                return;
+            }
+
             sessionRegistry.sendMessageToLocalUser(wsMessage);
         } catch (Exception exception) {
             log.warn("Invalid message from Redis pub/sub", exception);

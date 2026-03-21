@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -37,6 +38,7 @@ public class SessionRegistry {
     private final TaskScheduler taskScheduler;
     private final ObjectMapper objectMapper;
     private final ConcurrentMap<String, ConcurrentMap<String, ClientSession>> clientsByUser = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, ConcurrentMap<String, ClientSession>> clientsByRoom = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, ClientSession> sessionsById = new ConcurrentHashMap<>();
 
     public SessionRegistry(
@@ -69,7 +71,13 @@ public class SessionRegistry {
                     HEARTBEAT_INTERVAL
             );
 
-            ClientSession clientSession = new ClientSession(connectionId, userId, session, heartbeatFuture);
+            ClientSession clientSession = new ClientSession(
+                    connectionId,
+                    userId,
+                    session,
+                    heartbeatFuture,
+                    ConcurrentHashMap.newKeySet()
+            );
             clientsByUser.computeIfAbsent(userId, ignored -> new ConcurrentHashMap<>())
                     .put(connectionId, clientSession);
             sessionsById.put(rawSession.getId(), clientSession);
@@ -98,6 +106,7 @@ public class SessionRegistry {
         }
 
         boolean lastConnectionForUser = removeFromUserIndex(clientSession);
+        removeFromRoomIndexes(clientSession);
         if (lastConnectionForUser) {
             try {
                 redisPresenceService.unregisterUserFromServer(
@@ -112,6 +121,61 @@ public class SessionRegistry {
         quietlyClose(clientSession.session());
         metricsService.onClientDisconnect();
         log.info("User {} disconnected from server {}", clientSession.userId(), appProperties.getServerId());
+    }
+
+    public boolean joinRoom(String sessionId, String roomId) {
+        if (!StringUtils.hasText(roomId)) {
+            return false;
+        }
+
+        ClientSession clientSession = sessionsById.get(sessionId);
+        if (clientSession == null || !clientSession.roomIds().add(roomId)) {
+            return false;
+        }
+
+        ConcurrentMap<String, ClientSession> roomClients = clientsByRoom.computeIfAbsent(
+                roomId,
+                ignored -> new ConcurrentHashMap<>()
+        );
+        roomClients.put(clientSession.connectionId(), clientSession);
+
+        if (roomClients.size() == 1) {
+            try {
+                redisPresenceService.registerRoomOnServer(roomId, appProperties.getServerId());
+            } catch (RuntimeException exception) {
+                roomClients.remove(clientSession.connectionId());
+                clientsByRoom.remove(roomId, roomClients);
+                clientSession.roomIds().remove(roomId);
+                throw exception;
+            }
+        }
+
+        metricsService.onRoomJoin();
+        metricsService.updateActiveRooms(clientsByRoom.size());
+        return true;
+    }
+
+    public boolean leaveRoom(String sessionId, String roomId) {
+        if (!StringUtils.hasText(roomId)) {
+            return false;
+        }
+
+        ClientSession clientSession = sessionsById.get(sessionId);
+        if (clientSession == null) {
+            return false;
+        }
+
+        boolean removed = removeRoomMembership(clientSession, roomId);
+        if (removed) {
+            metricsService.onRoomLeave();
+            metricsService.updateActiveRooms(clientsByRoom.size());
+        }
+        return removed;
+    }
+
+    public boolean isSessionInRoom(String sessionId, String roomId) {
+        ClientSession clientSession = sessionsById.get(sessionId);
+        return clientSession != null && clientSession.roomIds().contains(roomId);
     }
 
     public void sendMessageToLocalUser(WsMessage message) {
@@ -143,6 +207,40 @@ public class SessionRegistry {
         }
     }
 
+    public void sendMessageToLocalRoom(WsMessage message) {
+        if (!StringUtils.hasText(message.getRoomId())) {
+            log.warn("roomId is empty, cannot broadcast room message: {}", message);
+            return;
+        }
+
+        Map<String, ClientSession> roomClients = clientsByRoom.get(message.getRoomId());
+        if (roomClients == null || roomClients.isEmpty()) {
+            return;
+        }
+
+        final String payload;
+        try {
+            payload = objectMapper.writeValueAsString(message);
+        } catch (JsonProcessingException exception) {
+            log.warn("Failed to serialize outbound room message", exception);
+            return;
+        }
+
+        for (ClientSession clientSession : roomClients.values()) {
+            try {
+                clientSession.session().sendMessage(new TextMessage(payload));
+                metricsService.onMessageDelivered();
+            } catch (IOException exception) {
+                log.warn(
+                        "Failed to send room {} message to user {}",
+                        message.getRoomId(),
+                        clientSession.userId(),
+                        exception
+                );
+            }
+        }
+    }
+
     int localConnectionCount(String userId) {
         Map<String, ClientSession> sessions = clientsByUser.get(userId);
         return sessions == null ? 0 : sessions.size();
@@ -168,6 +266,37 @@ public class SessionRegistry {
         }
 
         clientsByUser.remove(clientSession.userId(), sessions);
+        return true;
+    }
+
+    private void removeFromRoomIndexes(ClientSession clientSession) {
+        for (String roomId : Set.copyOf(clientSession.roomIds())) {
+            removeRoomMembership(clientSession, roomId);
+        }
+        metricsService.updateActiveRooms(clientsByRoom.size());
+    }
+
+    private boolean removeRoomMembership(ClientSession clientSession, String roomId) {
+        if (!clientSession.roomIds().remove(roomId)) {
+            return false;
+        }
+
+        ConcurrentMap<String, ClientSession> roomClients = clientsByRoom.get(roomId);
+        if (roomClients == null) {
+            return true;
+        }
+
+        roomClients.remove(clientSession.connectionId());
+        if (!roomClients.isEmpty()) {
+            return true;
+        }
+
+        clientsByRoom.remove(roomId, roomClients);
+        try {
+            redisPresenceService.unregisterRoomFromServer(roomId, appProperties.getServerId());
+        } catch (RuntimeException exception) {
+            log.warn("Failed to remove Redis room presence for room {}", roomId, exception);
+        }
         return true;
     }
 

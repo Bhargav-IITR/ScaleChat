@@ -2,81 +2,92 @@
   "id": null,
   "uid": "wss-aggregated",
   "title": "WSS Aggregated Metrics",
-  "tags": ["wss","aggregated"],
+  "tags": ["wss", "aggregated"],
   "timezone": "browser",
   "schemaVersion": 37,
-  "version": 3,
-  "refresh": "60s",
+  "version": 4,
+  "refresh": "15s",
   "panels": [
     {
       "type": "stat",
-      "title": "Total Active Connections",
-      "gridPos": {"x":0,"y":0,"w":4,"h":3},
-      "targets":[{"expr":"sum(wss_active_connections)","legendFormat":"Active Connections"}],
-      "fieldConfig":{"defaults":{"unit":"none","color":{"mode":"thresholds"}},"thresholds":{"mode":"absolute","steps":[{"color":"green","value":null},{"color":"yellow","value":50},{"color":"red","value":100}]}}
+      "title": "Active Connections",
+      "gridPos": {"x": 0, "y": 0, "w": 3, "h": 3},
+      "targets": [{"expr": "sum(wss_active_connections)", "legendFormat": "Connections"}]
     },
     {
       "type": "stat",
-      "title": "Total Messages/sec",
-      "gridPos":{"x":4,"y":0,"w":4,"h":3},
-      "targets":[{"expr":"sum(rate(wss_messages_total[1m]))","legendFormat":"Messages/sec"}],
-      "fieldConfig":{"defaults":{"unit":"msgs/s","color":{"mode":"thresholds"}},"thresholds":{"mode":"absolute","steps":[{"color":"green","value":null},{"color":"yellow","value":100},{"color":"red","value":500}]}}
+      "title": "Active Rooms",
+      "gridPos": {"x": 3, "y": 0, "w": 3, "h": 3},
+      "targets": [{"expr": "sum(wss_active_rooms)", "legendFormat": "Rooms"}]
     },
     {
       "type": "stat",
-      "title": "Total Messages Processed",
-      "gridPos":{"x":8,"y":0,"w":4,"h":3},
-      "targets":[{"expr":"sum(wss_messages_total)","legendFormat":"Total Messages"}],
-      "fieldConfig":{"defaults":{"unit":"none"}}
+      "title": "Msgs / sec",
+      "gridPos": {"x": 6, "y": 0, "w": 3, "h": 3},
+      "targets": [{"expr": "sum(rate(wss_messages_total[1m]))", "legendFormat": "Messages/sec"}]
     },
     {
       "type": "stat",
-      "title": "Total Messages Delivered",
-      "gridPos":{"x":0,"y":3,"w":4,"h":3},
-      "targets":[{"expr":"sum(wss_messages_delivered_total)","legendFormat":"Delivered"}],
-      "fieldConfig":{"defaults":{"unit":"none"}}
+      "title": "Avg Latency (ms)",
+      "gridPos": {"x": 9, "y": 0, "w": 3, "h": 3},
+      "targets": [{
+        "expr": "sum(rate(wss_latency_ms_sum[5m])) / sum(rate(wss_latency_ms_count[5m]))",
+        "legendFormat": "Latency ms"
+      }]
+    },
+    {
+      "type": "stat",
+      "title": "Direct Messages",
+      "gridPos": {"x": 0, "y": 3, "w": 3, "h": 3},
+      "targets": [{"expr": "sum(wss_direct_messages_total)", "legendFormat": "Direct"}]
+    },
+    {
+      "type": "stat",
+      "title": "Room Messages",
+      "gridPos": {"x": 3, "y": 3, "w": 3, "h": 3},
+      "targets": [{"expr": "sum(wss_room_messages_total)", "legendFormat": "Room"}]
+    },
+    {
+      "type": "stat",
+      "title": "Messages Delivered",
+      "gridPos": {"x": 6, "y": 3, "w": 3, "h": 3},
+      "targets": [{"expr": "sum(wss_messages_delivered_total)", "legendFormat": "Delivered"}]
     },
     {
       "type": "stat",
       "title": "Unexpected Disconnects",
-      "gridPos":{"x":4,"y":3,"w":4,"h":3},
-      "targets":[{"expr":"sum(wss_unexpected_disconnects_total)","legendFormat":"Disconnects"}],
-      "fieldConfig":{"defaults":{"unit":"none","color":{"mode":"thresholds"}},"thresholds":{"mode":"absolute","steps":[{"color":"green","value":null},{"color":"yellow","value":5},{"color":"red","value":20}]}}
-    },
-    {
-      "type": "stat",
-      "title": "Avg CPU Usage (%)",
-      "gridPos": {"x":8,"y":3,"w":4,"h":3},
-      "targets":[{"expr":"avg(rate(container_cpu_usage_seconds_total[1m])) * 100","legendFormat":"CPU %"}],
-      "fieldConfig":{"defaults":{"unit":"percent","color":{"mode":"thresholds"}},"thresholds":{"mode":"absolute","steps":[{"color":"green","value":null},{"color":"yellow","value":50},{"color":"red","value":80}]}}
-    },
-    {
-      "type": "stat",
-      "title": "Avg Memory Usage (MB)",
-      "gridPos":{"x":0,"y":6,"w":4,"h":3},
-      "targets":[{"expr":"avg(container_memory_usage_bytes) / (1024*1024)","legendFormat":"Memory MB"}],
-      "fieldConfig":{"defaults":{"unit":"megabytes","color":{"mode":"thresholds"}},"thresholds":{"mode":"absolute","steps":[{"color":"green","value":null},{"color":"yellow","value":500},{"color":"red","value":1000}]}}
+      "gridPos": {"x": 9, "y": 3, "w": 3, "h": 3},
+      "targets": [{"expr": "sum(wss_unexpected_disconnects_total)", "legendFormat": "Disconnects"}]
     },
     {
       "type": "timeseries",
-      "title": "Packet Loss Over Time",
-      "gridPos":{"x":4,"y":6,"w":8,"h":6},
-      "targets":[{"expr":"sum(wss_messages_total) - sum(wss_messages_delivered_total)","legendFormat":"Lost Messages"}],
-      "fieldConfig":{"defaults":{"unit":"none","color":{"mode":"palette-classic"}}}
+      "title": "Connections Over Time",
+      "gridPos": {"x": 0, "y": 6, "w": 6, "h": 6},
+      "targets": [{"expr": "sum(wss_active_connections)", "legendFormat": "Connections"}]
     },
     {
       "type": "timeseries",
-      "title": "CPU Usage Over Time (%)",
-      "gridPos":{"x":0,"y":12,"w":6,"h":6},
-      "targets":[{"expr":"avg(rate(container_cpu_usage_seconds_total[1m])) * 100","legendFormat":"CPU %"}],
-      "fieldConfig":{"defaults":{"unit":"percent"}}
+      "title": "Rooms Over Time",
+      "gridPos": {"x": 6, "y": 6, "w": 6, "h": 6},
+      "targets": [{"expr": "sum(wss_active_rooms)", "legendFormat": "Rooms"}]
     },
     {
       "type": "timeseries",
-      "title": "Memory Usage Over Time (MB)",
-      "gridPos":{"x":6,"y":12,"w":6,"h":6},
-      "targets":[{"expr":"avg(container_memory_usage_bytes) / (1024*1024)","legendFormat":"Memory MB"}],
-      "fieldConfig":{"defaults":{"unit":"megabytes"}}
+      "title": "Message Throughput",
+      "gridPos": {"x": 0, "y": 12, "w": 6, "h": 6},
+      "targets": [
+        {"expr": "sum(rate(wss_direct_messages_total[1m]))", "legendFormat": "Direct/sec"},
+        {"expr": "sum(rate(wss_room_messages_total[1m]))", "legendFormat": "Room/sec"}
+      ]
+    },
+    {
+      "type": "timeseries",
+      "title": "Room Join / Leave Activity",
+      "gridPos": {"x": 6, "y": 12, "w": 6, "h": 6},
+      "targets": [
+        {"expr": "sum(rate(wss_room_joins_total[5m]))", "legendFormat": "Joins/sec"},
+        {"expr": "sum(rate(wss_room_leaves_total[5m]))", "legendFormat": "Leaves/sec"}
+      ]
     }
   ]
 }

@@ -77,7 +77,45 @@ public class AppWebSocketHandler extends TextWebSocketHandler {
         if (message.getType() == WsMessageType.CHAT_MESSAGE) {
             log.info("Received chat message from {}: {}", userId, message.getPayload());
             redisRoutingService.sendMessageToUser(message);
-            metricsService.onMessageReceived();
+            metricsService.onDirectMessageReceived();
+            return;
+        }
+
+        if (message.getType() == WsMessageType.ROOM_JOIN) {
+            if (!StringUtils.hasText(message.getRoomId())) {
+                log.warn("Invalid room join from {} with empty roomId", userId);
+                return;
+            }
+
+            sessionRegistry.joinRoom(session.getId(), message.getRoomId());
+            log.info("User {} joined room {}", userId, message.getRoomId());
+            return;
+        }
+
+        if (message.getType() == WsMessageType.ROOM_LEAVE) {
+            if (!StringUtils.hasText(message.getRoomId())) {
+                log.warn("Invalid room leave from {} with empty roomId", userId);
+                return;
+            }
+
+            sessionRegistry.leaveRoom(session.getId(), message.getRoomId());
+            log.info("User {} left room {}", userId, message.getRoomId());
+            return;
+        }
+
+        if (message.getType() == WsMessageType.ROOM_MESSAGE) {
+            if (!StringUtils.hasText(message.getRoomId())) {
+                log.warn("Invalid room message from {} with empty roomId", userId);
+                return;
+            }
+            if (!sessionRegistry.isSessionInRoom(session.getId(), message.getRoomId())) {
+                log.warn("User {} attempted to send room message without joining room {}", userId, message.getRoomId());
+                return;
+            }
+
+            log.info("Received room message from {} for room {}", userId, message.getRoomId());
+            redisRoutingService.sendMessageToRoom(message);
+            metricsService.onRoomMessageReceived();
             return;
         }
 

@@ -15,6 +15,9 @@ public class WsMessage {
     @JsonProperty("receiverID")
     private String receiverID;
 
+    @JsonProperty("roomId")
+    private String roomId;
+
     @JsonProperty("senderId")
     private String senderId;
 
@@ -42,6 +45,14 @@ public class WsMessage {
 
     public void setReceiverID(String receiverID) {
         this.receiverID = receiverID;
+    }
+
+    public String getRoomId() {
+        return roomId;
+    }
+
+    public void setRoomId(String roomId) {
+        this.roomId = roomId;
     }
 
     public String getSenderId() {
@@ -72,6 +83,7 @@ public class WsMessage {
         return "WsMessage{"
                 + "type=" + type
                 + ", receiverID='" + receiverID + '\''
+                + ", roomId='" + roomId + '\''
                 + ", senderId='" + senderId + '\''
                 + '}';
     }

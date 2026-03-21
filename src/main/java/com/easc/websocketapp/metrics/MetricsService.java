@@ -1,36 +1,74 @@
 package com.easc.websocketapp.metrics;
 
 import com.easc.websocketapp.config.AppProperties;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Tag;
 import java.util.List;
-import java.util.concurrent.atomic.AtomicLong;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.scheduling.annotation.Scheduled;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.springframework.stereotype.Service;
-import software.amazon.awssdk.services.cloudwatch.CloudWatchClient;
-import software.amazon.awssdk.services.cloudwatch.model.Dimension;
-import software.amazon.awssdk.services.cloudwatch.model.MetricDatum;
-import software.amazon.awssdk.services.cloudwatch.model.PutMetricDataRequest;
-import software.amazon.awssdk.services.cloudwatch.model.StandardUnit;
 
 @Service
 public class MetricsService {
 
-    private static final Logger log = LoggerFactory.getLogger(MetricsService.class);
+    private final AtomicInteger activeConnectionsCount = new AtomicInteger();
+    private final AtomicInteger activeRoomsCount = new AtomicInteger();
+    private final Counter messagesCounter;
+    private final Counter directMessagesCounter;
+    private final Counter roomMessagesCounter;
+    private final Counter messagesDeliveredCounter;
+    private final Counter unexpectedDisconnectsCounter;
+    private final Counter roomJoinsCounter;
+    private final Counter roomLeavesCounter;
+    private final DistributionSummary latencySummary;
 
-    private final CloudWatchClient cloudWatchClient;
-    private final AppProperties appProperties;
+    public MetricsService(MeterRegistry meterRegistry, AppProperties appProperties) {
+        List<Tag> tags = List.of(Tag.of("server_id", appProperties.getServerId()));
 
-    private final AtomicLong activeConnectionsCount = new AtomicLong();
-    private final AtomicLong messagesDeliveredCount = new AtomicLong();
-    private final AtomicLong messagesReceivedCount = new AtomicLong();
-    private final AtomicLong unexpectedDisconnectsCount = new AtomicLong();
-    private final AtomicLong latencyTotal = new AtomicLong();
-    private final AtomicLong latencyCount = new AtomicLong();
+        Gauge.builder("wss.active.connections", activeConnectionsCount, AtomicInteger::get)
+                .description("Currently connected websocket clients")
+                .tags(tags)
+                .register(meterRegistry);
+        Gauge.builder("wss.active.rooms", activeRoomsCount, AtomicInteger::get)
+                .description("Rooms with at least one local member")
+                .tags(tags)
+                .register(meterRegistry);
 
-    public MetricsService(CloudWatchClient cloudWatchClient, AppProperties appProperties) {
-        this.cloudWatchClient = cloudWatchClient;
-        this.appProperties = appProperties;
+        messagesCounter = Counter.builder("wss.messages")
+                .description("Total websocket messages received")
+                .tags(tags)
+                .register(meterRegistry);
+        directMessagesCounter = Counter.builder("wss.direct.messages")
+                .description("Direct websocket messages received")
+                .tags(tags)
+                .register(meterRegistry);
+        roomMessagesCounter = Counter.builder("wss.room.messages")
+                .description("Room websocket messages received")
+                .tags(tags)
+                .register(meterRegistry);
+        messagesDeliveredCounter = Counter.builder("wss.messages.delivered")
+                .description("Messages delivered to local websocket sessions")
+                .tags(tags)
+                .register(meterRegistry);
+        unexpectedDisconnectsCounter = Counter.builder("wss.unexpected.disconnects")
+                .description("Unexpected websocket disconnects")
+                .tags(tags)
+                .register(meterRegistry);
+        roomJoinsCounter = Counter.builder("wss.room.joins")
+                .description("Successful room join operations")
+                .tags(tags)
+                .register(meterRegistry);
+        roomLeavesCounter = Counter.builder("wss.room.leaves")
+                .description("Successful room leave operations")
+                .tags(tags)
+                .register(meterRegistry);
+        latencySummary = DistributionSummary.builder("wss.latency.ms")
+                .description("Latency reports submitted by clients in milliseconds")
+                .baseUnit("milliseconds")
+                .tags(tags)
+                .register(meterRegistry);
     }
 
     public void onClientConnect() {
@@ -41,77 +79,37 @@ public class MetricsService {
         activeConnectionsCount.updateAndGet(current -> Math.max(0, current - 1));
     }
 
+    public void updateActiveRooms(int activeRoomCount) {
+        activeRoomsCount.set(Math.max(0, activeRoomCount));
+    }
+
     public void onMessageDelivered() {
-        messagesDeliveredCount.incrementAndGet();
+        messagesDeliveredCounter.increment();
     }
 
     public void onUnexpectedDisconnect() {
-        unexpectedDisconnectsCount.incrementAndGet();
+        unexpectedDisconnectsCounter.increment();
     }
 
-    public void onMessageReceived() {
-        messagesReceivedCount.incrementAndGet();
+    public void onDirectMessageReceived() {
+        messagesCounter.increment();
+        directMessagesCounter.increment();
+    }
+
+    public void onRoomMessageReceived() {
+        messagesCounter.increment();
+        roomMessagesCounter.increment();
+    }
+
+    public void onRoomJoin() {
+        roomJoinsCounter.increment();
+    }
+
+    public void onRoomLeave() {
+        roomLeavesCounter.increment();
     }
 
     public void onLatencyReport(double latencyMs) {
-        latencyTotal.addAndGet(Math.round(latencyMs));
-        latencyCount.incrementAndGet();
-    }
-
-    @Scheduled(fixedDelayString = "${app.metrics.cloudwatch-interval-ms:60000}")
-    public void pushMetricsToCloudWatch() {
-        long active = activeConnectionsCount.get();
-        long messagesReceived = messagesReceivedCount.get();
-        long messagesDelivered = messagesDeliveredCount.get();
-        long unexpectedDisconnects = unexpectedDisconnectsCount.get();
-        long totalLatency = latencyTotal.getAndSet(0);
-        long totalLatencySamples = latencyCount.getAndSet(0);
-
-        double averageLatency = totalLatencySamples > 0
-                ? (double) totalLatency / totalLatencySamples
-                : 0.0d;
-
-        PutMetricDataRequest request = PutMetricDataRequest.builder()
-                .namespace("wss/metrics")
-                .metricData(List.of(
-                        countMetric("ActiveConnections", active),
-                        countMetric("MessagesTotal", messagesReceived),
-                        countMetric("MessagesDelivered", messagesDelivered),
-                        countMetric("UnexpectedDisconnects", unexpectedDisconnects),
-                        millisecondsMetric("AverageLatencyMs", averageLatency)
-                ))
-                .build();
-
-        try {
-            cloudWatchClient.putMetricData(request);
-            log.info("Pushed metrics to CloudWatch");
-        } catch (RuntimeException exception) {
-            log.warn("Failed to push metrics to CloudWatch", exception);
-        }
-    }
-
-    private MetricDatum countMetric(String name, double value) {
-        return MetricDatum.builder()
-                .metricName(name)
-                .value(value)
-                .unit(StandardUnit.COUNT)
-                .dimensions(serverDimension())
-                .build();
-    }
-
-    private MetricDatum millisecondsMetric(String name, double value) {
-        return MetricDatum.builder()
-                .metricName(name)
-                .value(value)
-                .unit(StandardUnit.MILLISECONDS)
-                .dimensions(serverDimension())
-                .build();
-    }
-
-    private Dimension serverDimension() {
-        return Dimension.builder()
-                .name("ServerID")
-                .value(appProperties.getServerId())
-                .build();
+        latencySummary.record(latencyMs);
     }
 }

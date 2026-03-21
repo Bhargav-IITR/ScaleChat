@@ -15,16 +15,14 @@ public class ApplicationConfiguration {
             @Value("${WSS_PORT:8081}") String wssPort,
             @Value("${JWT_SECRET:supersecret}") String jwtSecret,
             @Value("${ENVIRONMENT:development}") String environment,
-            @Value("${REDIS_URI:redis://localhost:6379}") String redisUri,
-            @Value("${AWS_REGION:ap-south-1}") String awsRegion
+            @Value("${REDIS_URI:redis://localhost:6379}") String redisUri
     ) {
         return new AppProperties(
                 UUID.randomUUID().toString(),
                 wssPort,
                 jwtSecret,
                 environment,
-                redisUri,
-                awsRegion
+                redisUri
         );
     }
 
