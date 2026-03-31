@@ -104,3 +104,176 @@ The app exports metrics such as:
 - `metrics/prometheus/` Prometheus scrape config
 - `metrics/grafana/` provisioned dashboards and datasources
 - `docs/` sample payloads and notes
+
+# WebSocket Demo — Local Setup Guide
+
+A step-by-step guide to running a two-server WebSocket demo with Redis pub/sub for cross-server messaging.
+
+---
+
+## Prerequisites
+
+- Docker Desktop (running)
+- Java + Maven installed
+- Project cloned at `D:\websocket\websocket-app-main`
+
+---
+
+## 1. Start Redis
+
+```bash
+docker start ws-redis
+```
+
+> **First time only** — if `ws-redis` doesn't exist yet:
+> ```bash
+> docker run -d --name ws-redis -p 6379:6379 redis:7-alpine
+> ```
+
+---
+
+## 2. Start Server 1
+
+Open a **new PowerShell window** and run:
+
+```powershell
+cd D:\websocket\websocket-app-main
+
+$env:WSS_PORT="8081"
+$env:METRICS_PORT="9000"
+$env:REDIS_URI="redis://localhost:6379"
+
+mvn spring-boot:run
+```
+
+---
+
+## 3. Start Server 2
+
+Open **another PowerShell window** and run:
+
+```powershell
+cd D:\websocket\websocket-app-main
+
+$env:WSS_PORT="8082"
+$env:METRICS_PORT="9001"
+$env:REDIS_URI="redis://localhost:6379"
+
+mvn spring-boot:run
+```
+
+---
+
+## 4. Open Browser Tabs
+
+| Tab | URL |
+|-----|-----|
+| **Tab A** | http://localhost:8081/health |
+| **Tab B** | http://localhost:8082/health |
+
+Open **DevTools Console** (`F12`) in each tab.
+
+---
+
+## 5. Connect Users via WebSocket
+
+### Tab A Console — Connect `user1` to Server 1
+
+```js
+window.ws1 = new WebSocket("ws://localhost:8081/ws?userId=user1");
+ws1.onopen    = () => console.log("user1 connected to server1");
+ws1.onmessage = (e) => console.log("user1 received:", JSON.parse(e.data));
+ws1.onclose   = (e) => console.log("user1 closed:", e.code, e.reason);
+```
+
+### Tab B Console — Connect `user2` to Server 2
+
+```js
+window.ws2 = new WebSocket("ws://localhost:8082/ws?userId=user2");
+ws2.onopen    = () => console.log("user2 connected to server2");
+ws2.onmessage = (e) => console.log("user2 received:", JSON.parse(e.data));
+ws2.onclose   = (e) => console.log("user2 closed:", e.code, e.reason);
+```
+
+---
+
+## 6. Direct Message Demo
+
+### Send from `user1` → `user2` (Tab A Console)
+
+```js
+ws1.send(JSON.stringify({
+  type: "chat_message",
+  receiverID: "user2",
+  payload: "hello from user1 via server1"
+}));
+```
+
+**Expected behaviour:**
+- Server 1 logs: received a `chat_message` from `user1`
+- Server 2 logs: received a Redis pub/sub message on its own server channel
+- **Tab B** prints the delivered message with `senderId: "user1"` and a timestamp
+
+### Send the reverse — `user2` → `user1` (Tab B Console)
+
+```js
+ws2.send(JSON.stringify({
+  type: "chat_message",
+  receiverID: "user1",
+  payload: "reply from user2 via server2"
+}));
+```
+
+---
+
+## 7. Room Message Demo
+
+### Join the same room from both tabs
+
+```js
+// Tab A
+ws1.send(JSON.stringify({ type: "room_join", roomId: "general" }));
+
+// Tab B
+ws2.send(JSON.stringify({ type: "room_join", roomId: "general" }));
+```
+
+### Send a room message from `user1` (Tab A Console)
+
+```js
+ws1.send(JSON.stringify({
+  type: "room_message",
+  roomId: "general",
+  payload: "hello room from user1"
+}));
+```
+
+**Expected behaviour:**
+- **Both Tab A and Tab B** receive the room message
+- Each server delivers only to its own local WebSocket clients
+- Redis fans the message out to all active servers subscribed to `general`
+
+### Optional — Leave the room (Tab B Console)
+
+```js
+ws2.send(JSON.stringify({ type: "room_leave", roomId: "general" }));
+```
+
+---
+
+## 8. Redis Proof (Optional — Great for Interviews)
+
+Run these in a separate terminal to visually confirm shared presence state in Redis:
+
+```bash
+# See which server(s) user1 is connected to
+docker exec ws-redis redis-cli SMEMBERS user_servers:user1
+
+# See which server(s) user2 is connected to
+docker exec ws-redis redis-cli SMEMBERS user_servers:user2
+
+# See which servers have clients in the "general" room
+docker exec ws-redis redis-cli SMEMBERS room:general
+```
+
+> After both users join `room:general` from different servers, `SMEMBERS room:general` should return **two distinct server IDs** — proving cross-server coordination via Redis.
