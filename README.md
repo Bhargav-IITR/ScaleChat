@@ -260,20 +260,3 @@ ws2.send(JSON.stringify({ type: "room_leave", roomId: "general" }));
 ```
 
 ---
-
-## 8. Redis Proof (Optional — Great for Interviews)
-
-Run these in a separate terminal to visually confirm shared presence state in Redis:
-
-```bash
-# See which server(s) user1 is connected to
-docker exec ws-redis redis-cli SMEMBERS user_servers:user1
-
-# See which server(s) user2 is connected to
-docker exec ws-redis redis-cli SMEMBERS user_servers:user2
-
-# See which servers have clients in the "general" room
-docker exec ws-redis redis-cli SMEMBERS room:general
-```
-
-> After both users join `room:general` from different servers, `SMEMBERS room:general` should return **two distinct server IDs** — proving cross-server coordination via Redis.
