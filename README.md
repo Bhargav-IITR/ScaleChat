@@ -155,7 +155,7 @@ Open **another PowerShell window** and run:
 ```powershell
 cd D:\websocket\websocket-app-main
 
-$env:WSS_PORT="8082"
+$env:WSS_PORT="8083"
 $env:METRICS_PORT="9001"
 $env:REDIS_URI="redis://localhost:6379"
 
@@ -276,4 +276,44 @@ docker exec ws-redis redis-cli SMEMBERS user_servers:user2
 docker exec ws-redis redis-cli SMEMBERS room:general
 ```
 
-> After both users join `room:general` from different servers, `SMEMBERS room:general` should return **two distinct server IDs** — proving cross-server coordination via Redis.
+> After both users join `room:general` from different servers, `SMEMBERS room:general` should return **two distinct server IDs** - proving cross-server coordination via Redis.
+
+---
+
+## 9. WebSocket Load Test
+
+The platform was load-tested locally with `k6` using `websocket-load-test.js`. Each virtual user opened a pair of WebSocket connections split across two Spring Boot replicas, then sent one cross-server direct message per second through Redis Pub/Sub for approximately 100 seconds.
+
+Run the validated scenario from PowerShell after starting Redis and both application replicas:
+
+```powershell
+$env:PAIRS="100"
+k6 run .\websocket-load-test.js
+```
+
+### Validated result
+
+Test environment: two local Spring Boot replicas, one Redis instance, and the k6 load generator running on the same development machine.
+
+| Metric | Result |
+| --- | ---: |
+| Client pairs / k6 VUs | 100 |
+| Concurrent WebSocket connections | 200 |
+| Test traffic duration | 100 seconds |
+| Messages sent | 9,900 |
+| Messages received | 9,900 |
+| Successful delivery | 100% |
+| Effective message throughput | 93.91 messages/second |
+| Average end-to-end latency | 58.12 ms |
+| Median end-to-end latency | 20 ms |
+| p90 end-to-end latency | 86 ms |
+| p95 end-to-end latency | 139.04 ms |
+| Maximum observed latency | 1.86 seconds |
+| Application errors | 0 |
+| Completed / interrupted VUs | 100 / 0 |
+
+The test passed both configured thresholds: zero application errors and end-to-end p95 latency below 200 ms.
+
+### Stress boundary observed
+
+A separate 250-pair run attempted 500 concurrent WebSocket connections. It did not meet the acceptance criteria: 266 errors occurred, only 136 of 250 VUs completed, and p95 latency rose to 637.05 ms. This result is recorded as an observed local stress boundary, not as supported capacity. Results may vary on production-grade or isolated infrastructure because the applications, Redis, and load generator shared one machine.
